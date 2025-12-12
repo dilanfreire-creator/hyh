@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Control Ventilador / Calefactor</title>
+  <style>
+    :root{
+      --bg:#f6f7fb; --card:#ffffff; --accent:#0066cc; --ok:#2d9b2d; --warn:#d67a00;
+      --muted:#666;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    body{margin:0;background:var(--bg);color:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+    .app{width:100%;max-width:760px;background:var(--card);border-radius:12px;box-shadow:0 8px 30px rgba(10,10,20,0.08);padding:18px;}
+    h1{margin:0 0 6px;font-size:20px}
+    p.lead{margin:0 0 12px;color:var(--muted);font-size:13px}
+    .grid{display:grid;grid-template-columns:1fr 260px;gap:16px}
+    .panel{background:#fbfdff;padding:12px;border-radius:10px}
+    .temps{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+    .temp-card{background:white;padding:10px;border-radius:8px;box-shadow:0 2px 8px rgba(10,10,20,0.03);text-align:center}
+    .temp-card small{display:block;color:var(--muted);font-size:12px}
+    .big{font-size:20px;font-weight:600}
+    .controls{display:flex;flex-direction:column;gap:10px}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .btn{padding:8px 12px;border-radius:8px;border:0;cursor:pointer;font-weight:600}
+    .btn-primary{background:var(--accent);color:white}
+    .btn-ghost{background:transparent;border:1px solid #e6e8ef}
+    .toggle{display:flex;gap:8px;align-items:center}
+    .switch{width:48px;height:28px;border-radius:20px;background:#e6e8ef;position:relative;cursor:pointer;flex-shrink:0}
+    .knob{width:22px;height:22px;background:white;border-radius:50%;position:absolute;top:3px;left:3px;transition:all .18s ease}
+    .switch.on{background:var(--accent);}
+    .switch.on .knob{left:23px}
+    .state{font-size:13px;color:var(--muted)}
+    .manual-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .status-line{font-size:13px;color:var(--muted);margin-top:8px}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px}
+    footer{font-size:12px;color:var(--muted);text-align:right;margin-top:12px}
+    .indicator{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:middle}
+    .on{background:var(--ok)} .off{background:#ccc}
+    .warn{background:var(--warn)}
+    @media (max-width:720px){ .grid{grid-template-columns:1fr; } .panel{padding:10px} }
+  </style>
+</head>
+<body>
+  <div class="app" role="main">
+    <h1>Control Climatización</h1>
+    <p class="lead">Control manual / automático del ventilador y la calefacción. Conecta esto con tu ESP (rutas /status y /set).</p>
+
+    <div class="grid">
+      <!-- LEFT -->
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:700">Sensores</div>
+            <div class="state">Lecturas en tiempo real</div>
+          </div>
+          <div id="lastUpdate" class="state">—</div>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div class="temps">
+          <div class="temp-card"><small>S1</small><div id="t1" class="big">-- °C</div></div>
+          <div class="temp-card"><small>S2</small><div id="t2" class="big">-- °C</div></div>
+          <div class="temp-card"><small>S3</small><div id="t3" class="big">-- °C</div></div>
+          <div class="temp-card"><small>S4</small><div id="t4" class="big">-- °C</div></div>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div class="temp-card" style="flex:1;text-align:left;padding:12px">
+            <small>Promedio (TG)</small>
+            <div id="prom" class="big">-- °C</div>
+            <div class="hint">Umbrales: calef ON ≤20°C, calef OFF ≥25°C, vent ON ≥28°C</div>
+          </div>
+          <div class="temp-card" style="width:160px;text-align:center;padding:12px">
+            <small>Modo</small>
+            <div id="modeLabel" class="big">—</div>
+            <div id="modeDot" style="margin-top:6px"></div>
+          </div>
+        </div>
+
+        <div class="status-line" id="serverStatus">Conectando al servidor...</div>
+      </div>
+
+      <!-- RIGHT -->
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-weight:700">Controles</div>
+          <div style="font-size:13px;color:var(--muted)">Modo: <span id="modeText">—</span></div>
+        </div>
+
+        <div class="controls">
+          <div class="row">
+            <div style="font-weight:600">Auto / Manual</div>
+            <div class="toggle">
+              <div id="modeSwitch" class="switch" title="Cambiar modo">
+                <div class="knob"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="manual-controls" id="manualBlock" aria-hidden="true" style="opacity:0.6;pointer-events:none">
+            <button id="btnVent" class="btn btn-ghost">Ventilador: <strong id="lblVent">—</strong></button>
+            <button id="btnCalef" class="btn btn-ghost">Calefacción: <strong id="lblCalef">—</strong></button>
+          </div>
+
+          <div class="hint">En Auto, tu ESP controla todo. En Manual puedes activar/desactivar aquí.</div>
+
+          <div style="height:8px"></div>
+          <div style="display:flex;gap:8px">
+            <button id="refreshBtn" class="btn btn-ghost">Actualizar</button>
+            <button id="forceSync" class="btn btn-primary">Forzar lectura</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <span class="indicator off" id="netInd"></span><span id="netText">Desconectado</span>
+    </footer>
+  </div>
+
+<script>
+  const BASE_URL = '';
+  const POLL_MS = 2000;
+
+  const modeSwitch = document.getElementById('modeSwitch');
+  const modeLabel  = document.getElementById('modeLabel');
+  const modeText   = document.getElementById('modeText');
+  const modeDot    = document.getElementById('modeDot');
+  const t1El = document.getElementById('t1'), t2El = document.getElementById('t2'),
+        t3El = document.getElementById('t3'), t4El = document.getElementById('t4'),
+        promEl = document.getElementById('prom');
+  const btnVent = document.getElementById('btnVent'), btnCalef = document.getElementById('btnCalef');
+  const lblVent = document.getElementById('lblVent'), lblCalef = document.getElementById('lblCalef');
+  const manualBlock = document.getElementById('manualBlock');
+  const serverStatus = document.getElementById('serverStatus');
+  const lastUpdate = document.getElementById('lastUpdate');
+  const netInd = document.getElementById('netInd'), netText = document.getElementById('netText');
+
+  let current = { mode:'auto', vent:'off', calef:'off' };
+
+  function url(path){ return (BASE_URL||'') + path; }
+
+  async function fetchStatus(){
+    try{
+      const r = await fetch(url('/status'), {cache:'no-store'});
+      const j = await r.json();
+
+      t1El.textContent = formatT(j.t1);
+      t2El.textContent = formatT(j.t2);
+      t3El.textContent = formatT(j.t3);
+      t4El.textContent = formatT(j.t4);
+      promEl.textContent = formatT(j.prom);
+
+      current.mode = j.mode || current.mode;
+      current.vent = j.vent || current.vent;
+      current.calef = j.calef || current.calef;
+
+      updateModeUI();
+      updateActuatorsUI();
+
+      serverStatus.textContent = 'Última lectura recibida OK';
+      lastUpdate.textContent = new Date().toLocaleTimeString();
+      setNet(true);
+    }catch(e){
+      serverStatus.textContent = "Error conectando";
+      setNet(false);
+    }
+  }
+
+  function formatT(v){ return (typeof v==="number") ? v.toFixed(1)+" °C" : "-- °C"; }
+
+  function updateModeUI(){
+    const m = current.mode === 'manual' ? 'manual' : 'auto';
+    modeLabel.textContent = m.toUpperCase();
+    modeText.textContent = m;
+    modeDot.innerHTML = '<span class="indicator '+(m==='auto'?'on':'off')+'"></span>';
+
+    if(m==='manual'){
+      modeSwitch.classList.add('on');
+      manualBlock.style.opacity='1';
+      manualBlock.style.pointerEvents='auto';
+    }else{
+      modeSwitch.classList.remove('on');
+      manualBlock.style.opacity='0.6';
+      manualBlock.style.pointerEvents='none';
+    }
+  }
+
+  function updateActuatorsUI(){
+    lblVent.textContent = current.vent.toUpperCase();
+    lblCalef.textContent = current.calef.toUpperCase();
+
+    btnVent.className = 'btn ' + (current.vent==='on'?'btn-primary':'btn-ghost');
+    btnCalef.className = 'btn ' + (current.calef==='on'?'btn-primary':'btn-ghost');
+  }
+
+  async function setMode(mode){
+    try{
+      await fetch(url('/set?mode='+mode));
+      fetchStatus();
+    }catch(e){ alert("No se pudo cambiar modo"); }
+  }
+
+  async function setActuator(n,v){
+    try{
+      await fetch(url('/set?'+n+'='+v));
+      fetchStatus();
+    }catch(e){ alert("Error al enviar comando"); }
+  }
+
+  /* ============================
+     CONTRASEÑA PARA MODO MANUAL
+     ============================ */
+  modeSwitch.addEventListener('click', ()=>{
+
+    if(current.mode === 'auto'){
+      const pass = prompt("Ingrese contraseña para activar MANUAL:");
+      if(pass !== "12345"){
+        alert("Contraseña incorrecta");
+        return;
+      }
+      setMode('manual');
+      return;
+    }
+
+    if(current.mode === 'manual'){
+      setMode('auto');
+    }
+  });
+
+  btnVent.addEventListener('click', ()=>{
+    if(current.mode!=='manual') return alert("Usa MODO MANUAL");
+    setActuator('vent', current.vent==='on'?'off':'on');
+  });
+
+  btnCalef.addEventListener('click', ()=>{
+    if(current.mode!=='manual') return alert("Usa MODO MANUAL");
+    setActuator('calef', current.calef==='on'?'off':'on');
+  });
+
+  document.getElementById('refreshBtn').onclick = ()=>fetchStatus();
+  document.getElementById('forceSync').onclick = ()=>fetchStatus();
+
+  function setNet(ok){
+    netInd.className = 'indicator ' + (ok?'on':'off');
+    netText.textContent = ok ? "Conectado" : "Desconectado";
+  }
+
+  setInterval(fetchStatus, POLL_MS);
+  fetchStatus();
+</script>
+</body>
+</html>
